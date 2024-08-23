@@ -36,6 +36,12 @@
 #include "esp_err.h"
 #include "esp_spiffs.h"
 
+#include "driver/uart.h"
+#include "driver/gpio.h"
+#include "sdkconfig.h"
+#include "freertos/queue.h"
+
+
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -53,6 +59,45 @@ static const char *TAG = "MQTT_EXAMPLE";
 static int s_retry_num = 0;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
+
+static const int RX_BUF_SIZE = 10;
+static uint8_t uart_data[10] = {0};
+
+#define TXD_PIN 17
+#define RXD_PIN 16
+
+void init_uart(void)
+{
+    const uart_config_t uart_config = {
+        .baud_rate = 9600,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_APB,
+    };
+    // We won't use a buffer for sending data.
+    uart_driver_install(UART_NUM_2, RX_BUF_SIZE * 2, 0, 0, NULL, 0);
+    uart_param_config(UART_NUM_2, &uart_config);
+    uart_set_pin(UART_NUM_2, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+}
+
+static void rx_task(void *arg)
+{
+    static const char *RX_TASK_TAG = "RX_TASK";
+    esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
+    while (1)
+    {
+        const int len = uart_read_bytes(UART_NUM_2, uart_data,  (RX_BUF_SIZE - 1), 500 / portTICK_RATE_MS);
+        if (len) {
+            uart_data[len] = '\0';
+            ESP_LOGI(TAG, "Recv str: %s", (char *) uart_data);
+        }
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+    }
+    vTaskDelete(NULL);
+}
+
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -182,6 +227,7 @@ static void event_handler_smartconfig(void *arg, esp_event_base_t event_base,
         ESP_ERROR_CHECK(esp_wifi_disconnect());
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
         esp_wifi_connect();
+         vTaskDelay(5000 / portTICK_PERIOD_MS);
         mqtt_app_start();
     }
     else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE)
@@ -218,7 +264,7 @@ static void esp_mqtt_publish_task(void *parm)
     esp_mqtt_client_handle_t client = (esp_mqtt_client_handle_t)parm;
     while (1)
     {
-        msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", "kunjan", 6, 1, 1);
+        msg_id = esp_mqtt_client_publish(client, "kunjan/superb1",(char *) uart_data, 7, 1, 1);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         vTaskDelay(5000 / portTICK_RATE_MS);
     }
@@ -385,7 +431,9 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-
+    
+    init_uart();
+    
     ESP_LOGI(TAG, "Initializing SPIFFS");
 
     esp_vfs_spiffs_conf_t conf = {
@@ -464,14 +512,6 @@ void app_main(void)
         initialise_wifi(line, line1);
     }
 
-    // ESP_ERROR_CHECK(esp_netif_init());
-    // ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
-    // ESP_ERROR_CHECK(example_connect());
-
-    // mqtt_app_start();
+     xTaskCreate(&rx_task, "rx_task", 1024 * 2, NULL, 10, NULL);
+    
 }
