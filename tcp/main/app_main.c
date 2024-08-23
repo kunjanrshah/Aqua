@@ -350,38 +350,18 @@ static void initialise_wifi(char *ssid1, char *password1)
         ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
         ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
-        ESP_ERROR_CHECK(esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
 
-        // wifi_config_t wifi_config1 = {
-        //     .ap = {
-        //         .ssid = "superb1",
-        //         .password = "superb1",
-        //         .max_connection = 10,
-        //     },
-        // };
+       
         wifi_config_t wifi_config;
         bzero(&wifi_config, sizeof(wifi_config_t));
         memcpy(wifi_config.sta.ssid, ssid1, strlen(ssid1));
         memcpy(wifi_config.sta.password, password1, strlen(password1));
 
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-        //ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
         ESP_ERROR_CHECK(esp_wifi_start());
 
-        // ESP_LOGI(TAG, "wifi_init finished.");
-        // vTaskDelay(5000 / portTICK_PERIOD_MS);
-        // mqtt_app_start();
     }
-
-    // ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    // ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
-    //  ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config2));
-    // ESP_ERROR_CHECK(esp_wifi_start());
-
-    // ESP_LOGI(TAG, "wifi_init finished.");
-    // vTaskDelay(5000 / portTICK_PERIOD_MS);
-    // mqtt_app_start();
 }
 
 void app_main(void)
