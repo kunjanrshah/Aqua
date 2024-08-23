@@ -31,6 +31,10 @@
 #include "esp_wpa2.h"
 #include "esp_smartconfig.h"
 
+#include <sys/unistd.h>
+#include <sys/stat.h>
+#include "esp_err.h"
+#include "esp_spiffs.h"
 
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
 static EventGroupHandle_t s_wifi_event_group;
@@ -41,79 +45,104 @@ static EventGroupHandle_t s_wifi_event_group;
 static const int CONNECTED_BIT = BIT0;
 static const int ESPTOUCH_DONE_BIT = BIT1;
 
-static void smartconfig_example_task(void * parm);
+static void smartconfig_example_task(void *parm);
 static void mqtt_app_start(void);
 
 static const char *TAG = "MQTT_EXAMPLE";
 
 static int s_retry_num = 0;
 #define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
+#define WIFI_FAIL_BIT BIT1
 
-// static void event_handler(void* arg, esp_event_base_t event_base,int32_t event_id, void* event_data){
-//     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-//         esp_wifi_connect();
-//     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-       
-//         if (s_retry_num < 10) {
-//             esp_wifi_connect();
-//             s_retry_num++;
-//             ESP_LOGI(TAG, "retry to connect to the AP");
-//         } else {
-//             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-//         }
-//         ESP_LOGI(TAG,"connect to the AP fail");
-//     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-//         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-//         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
-//         s_retry_num = 0;
-       
-//         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-//         //mqtt_app_start();
-//     }
-// }
-
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                                    int32_t event_id, void* event_data)
+static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
-    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-        ESP_LOGI(TAG, "station "MACSTR" join, AID=%d",MAC2STR(event->mac), event->aid);
-       //  xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
-         
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-        ESP_LOGI(TAG, "station "MACSTR" leave, AID=%d",MAC2STR(event->mac), event->aid);
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
+    {
+        esp_wifi_connect();
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
+
+        if (s_retry_num < 10)
+        {
+            esp_wifi_connect();
+            s_retry_num++;
+            ESP_LOGI(TAG, "retry to connect to the AP");
+        }
+        else
+        {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+        ESP_LOGI(TAG, "connect to the AP fail");
+    }
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+    {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+        ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        s_retry_num = 0;
+
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        ESP_LOGI(TAG, "wifi_init finished.");
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        mqtt_app_start();
     }
 }
 
-static void event_handler(void* arg, esp_event_base_t event_base, 
-                                int32_t event_id, void* event_data)
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    if (event_id == WIFI_EVENT_AP_STACONNECTED)
+    {
+        wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *)event_data;
+        ESP_LOGI(TAG, "station " MACSTR " join, AID=%d", MAC2STR(event->mac), event->aid);
+        //  xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
+    }
+    else if (event_id == WIFI_EVENT_AP_STADISCONNECTED)
+    {
+        wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *)event_data;
+        ESP_LOGI(TAG, "station " MACSTR " leave, AID=%d", MAC2STR(event->mac), event->aid);
+    }
+}
+
+static void event_handler_smartconfig(void *arg, esp_event_base_t event_base,
+                                      int32_t event_id, void *event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
+    {
         xTaskCreate(smartconfig_example_task, "smartconfig_example_task", 4096, NULL, 3, NULL);
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
         esp_wifi_connect();
         xEventGroupClearBits(s_wifi_event_group, CONNECTED_BIT);
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    }
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+    {
         xEventGroupSetBits(s_wifi_event_group, CONNECTED_BIT);
-    } else if (event_base == SC_EVENT && event_id == SC_EVENT_SCAN_DONE) {
+    }
+    else if (event_base == SC_EVENT && event_id == SC_EVENT_SCAN_DONE)
+    {
         ESP_LOGI(TAG, "Scan done");
-    } else if (event_base == SC_EVENT && event_id == SC_EVENT_FOUND_CHANNEL) {
+    }
+    else if (event_base == SC_EVENT && event_id == SC_EVENT_FOUND_CHANNEL)
+    {
         ESP_LOGI(TAG, "Found channel");
-    } else if (event_base == SC_EVENT && event_id == SC_EVENT_GOT_SSID_PSWD) {
+    }
+    else if (event_base == SC_EVENT && event_id == SC_EVENT_GOT_SSID_PSWD)
+    {
         ESP_LOGI(TAG, "Got SSID and password");
 
         smartconfig_event_got_ssid_pswd_t *evt = (smartconfig_event_got_ssid_pswd_t *)event_data;
         wifi_config_t wifi_config;
-        uint8_t ssid[33] = { 0 };
-        uint8_t password[65] = { 0 };
+        uint8_t ssid[33] = {0};
+        uint8_t password[65] = {0};
 
         bzero(&wifi_config, sizeof(wifi_config_t));
         memcpy(wifi_config.sta.ssid, evt->ssid, sizeof(wifi_config.sta.ssid));
         memcpy(wifi_config.sta.password, evt->password, sizeof(wifi_config.sta.password));
         wifi_config.sta.bssid_set = evt->bssid_set;
-        if (wifi_config.sta.bssid_set == true) {
+        if (wifi_config.sta.bssid_set == true)
+        {
             memcpy(wifi_config.sta.bssid, evt->bssid, sizeof(wifi_config.sta.bssid));
         }
 
@@ -121,28 +150,61 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         memcpy(password, evt->password, sizeof(evt->password));
         ESP_LOGI(TAG, "SSID:%s", ssid);
         ESP_LOGI(TAG, "PASSWORD:%s", password);
-        
-        ESP_ERROR_CHECK( esp_wifi_disconnect() );
-        ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
+
+        ESP_LOGI(TAG, "Opening file");
+        FILE *f = fopen("/spiffs/vmllp_ssid.txt", "w");
+        if (f == NULL)
+        {
+            ESP_LOGE(TAG, "Failed to open file for writing");
+            return;
+        }
+        else
+        {
+            ESP_LOGI(TAG, "SSID in vmllp_ssid file written");
+        }
+        fprintf(f, (char *)ssid);
+        fclose(f);
+
+        ESP_LOGI(TAG, "Opening file");
+        FILE *f1 = fopen("/spiffs/vmllp_password.txt", "w");
+        if (f1 == NULL)
+        {
+            ESP_LOGI(TAG, "Failed to open file for writing");
+            return;
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Password in vmllp_password file written");
+        }
+        fprintf(f1, (char *)password);
+        fclose(f1);
+
+        ESP_ERROR_CHECK(esp_wifi_disconnect());
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
         esp_wifi_connect();
         mqtt_app_start();
-    } else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE) {
+    }
+    else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE)
+    {
         xEventGroupSetBits(s_wifi_event_group, ESPTOUCH_DONE_BIT);
     }
 }
 
-static void smartconfig_example_task(void * parm)
+static void smartconfig_example_task(void *parm)
 {
     EventBits_t uxBits;
-    ESP_ERROR_CHECK( esp_smartconfig_set_type(SC_TYPE_ESPTOUCH) );
+    ESP_ERROR_CHECK(esp_smartconfig_set_type(SC_TYPE_ESPTOUCH));
     smartconfig_start_config_t cfg = SMARTCONFIG_START_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_smartconfig_start(&cfg) );
-    while (1) {
-        uxBits = xEventGroupWaitBits(s_wifi_event_group, CONNECTED_BIT | ESPTOUCH_DONE_BIT, true, false, portMAX_DELAY); 
-        if(uxBits & CONNECTED_BIT) {
+    ESP_ERROR_CHECK(esp_smartconfig_start(&cfg));
+    while (1)
+    {
+        uxBits = xEventGroupWaitBits(s_wifi_event_group, CONNECTED_BIT | ESPTOUCH_DONE_BIT, true, false, portMAX_DELAY);
+        if (uxBits & CONNECTED_BIT)
+        {
             ESP_LOGI(TAG, "WiFi Connected to ap");
         }
-        if(uxBits & ESPTOUCH_DONE_BIT) {
+        if (uxBits & ESPTOUCH_DONE_BIT)
+        {
             ESP_LOGI(TAG, "smartconfig over");
             esp_smartconfig_stop();
             vTaskDelete(NULL);
@@ -153,12 +215,13 @@ static void smartconfig_example_task(void * parm)
 static void esp_mqtt_publish_task(void *parm)
 {
     int msg_id;
-    esp_mqtt_client_handle_t client = (esp_mqtt_client_handle_t) parm;
-    while(1){
-        msg_id = esp_mqtt_client_publish(client, "kunjan/superb1","kunjan", 6, 1, 1);
-    ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-    vTaskDelay(5000 / portTICK_RATE_MS);
-    }    
+    esp_mqtt_client_handle_t client = (esp_mqtt_client_handle_t)parm;
+    while (1)
+    {
+        msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", "kunjan", 6, 1, 1);
+        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        vTaskDelay(5000 / portTICK_RATE_MS);
+    }
     vTaskDelete(NULL);
 }
 
@@ -167,53 +230,55 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
     // your_context_t *context = event->context;
-    switch (event->event_id) {
-        case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-            xTaskCreate(&esp_mqtt_publish_task, "esp_mqtt_publish_task", 4096,(void *) client, 3, NULL);
-            // msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", "Hello Kushal", 0, 1, 0);
-            // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+    switch (event->event_id)
+    {
+    case MQTT_EVENT_CONNECTED:
+        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        xTaskCreate(&esp_mqtt_publish_task, "esp_mqtt_publish_task", 4096, (void *)client, 3, NULL);
+        // msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", "Hello Kushal", 0, 1, 0);
+        // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
 
-            // msg_id = esp_mqtt_client_subscribe(client, "kunjan/superb1", 0);
-            // ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+        // msg_id = esp_mqtt_client_subscribe(client, "kunjan/superb1", 0);
+        // ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
-            // msg_id = esp_mqtt_client_subscribe(client, "/topic/qos1", 1);
-            // ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+        // msg_id = esp_mqtt_client_subscribe(client, "/topic/qos1", 1);
+        // ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
-            // msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos1");
-            // ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
-            break;
-        case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-            break;
+        // msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos1");
+        // ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
+        break;
+    case MQTT_EVENT_DISCONNECTED:
+        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        break;
 
-        case MQTT_EVENT_SUBSCRIBED:
-            ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-            msg_id = esp_mqtt_client_publish(client, "kunjanrshah@gmail.com/topic1", "data", 0, 0, 0);
-            ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-            break;
-        case MQTT_EVENT_UNSUBSCRIBED:
-            ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
-            break;
-        case MQTT_EVENT_PUBLISHED:
-            ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
-            break;
-        case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-            printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-            printf("DATA=%.*s\r\n", event->data_len, event->data);
-            break;
-        case MQTT_EVENT_ERROR:
-            ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-            break;
-        default:
-            ESP_LOGI(TAG, "Other event id:%d", event->event_id);
-            break;
+    case MQTT_EVENT_SUBSCRIBED:
+        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
+        msg_id = esp_mqtt_client_publish(client, "kunjanrshah@gmail.com/topic1", "data", 0, 0, 0);
+        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        break;
+    case MQTT_EVENT_UNSUBSCRIBED:
+        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_PUBLISHED:
+        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_DATA:
+        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+        printf("DATA=%.*s\r\n", event->data_len, event->data);
+        break;
+    case MQTT_EVENT_ERROR:
+        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+        break;
+    default:
+        ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+        break;
     }
     return ESP_OK;
 }
 
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%d", base, event_id);
     mqtt_event_handler_cb(event_data);
 }
@@ -221,22 +286,26 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 static void mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .uri = "mqtt://broker.hivemq.com:1883",//mqtt://192.168.1.101:1883
+        .uri = "mqtt://broker.hivemq.com:1883", // mqtt://192.168.1.101:1883
         .username = "kunjanrshah@gmail.com",
-        .password = "kunjan@123"
-    };
+        .password = "kunjan@123"};
 #if CONFIG_BROKER_URL_FROM_STDIN
     char line[128];
 
-    if (strcmp(mqtt_cfg.uri, "FROM_STDIN") == 0) {
+    if (strcmp(mqtt_cfg.uri, "FROM_STDIN") == 0)
+    {
         int count = 0;
         printf("Please enter url of mqtt broker\n");
-        while (count < 128) {
+        while (count < 128)
+        {
             int c = fgetc(stdin);
-            if (c == '\n') {
+            if (c == '\n')
+            {
                 line[count] = '\0';
                 break;
-            } else if (c > 0 && c < 127) {
+            }
+            else if (c > 0 && c < 127)
+            {
                 line[count] = c;
                 ++count;
             }
@@ -244,7 +313,9 @@ static void mqtt_app_start(void)
         }
         mqtt_cfg.uri = line;
         printf("Broker url: %s\n", line);
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG, "Configuration mismatch: wrong broker url");
         abort();
     }
@@ -255,8 +326,7 @@ static void mqtt_app_start(void)
     esp_mqtt_client_start(client);
 }
 
-
-static void initialise_wifi(void)
+static void initialise_wifi(char *ssid1, char *password1)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     s_wifi_event_group = xEventGroupCreate();
@@ -266,37 +336,53 @@ static void initialise_wifi(void)
     esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-     ESP_ERROR_CHECK( esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL) );
-     ESP_ERROR_CHECK( esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL) );
-     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&wifi_event_handler,NULL,NULL));
-    ESP_ERROR_CHECK( esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL) );
+    if (ssid1 == NULL && password1 == NULL)
+    {
+        ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler_smartconfig, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler_smartconfig, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &event_handler_smartconfig, NULL));
+    }
+    else
+    {
+        ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
 
-            wifi_config_t wifi_config1 = {
-                .ap = {
-                .ssid = "superb1",
-                .password = "superb1",
-                .max_connection = 10,
-                },
-            };
-            // wifi_config_t wifi_config2 = {
-            //     .sta = {
-            //         .ssid = "Pratyush21-2.4G",
-            //         .password = "Shraddha10",
-            //     },
-            // };
+        // wifi_config_t wifi_config1 = {
+        //     .ap = {
+        //         .ssid = "superb1",
+        //         .password = "superb1",
+        //         .max_connection = 10,
+        //     },
+        // };
+        wifi_config_t wifi_config;
+        bzero(&wifi_config, sizeof(wifi_config_t));
+        memcpy(wifi_config.sta.ssid, ssid1, strlen(ssid1));
+        memcpy(wifi_config.sta.password, password1, strlen(password1));
 
-    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_APSTA) );
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
-    //ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config2));
-    ESP_ERROR_CHECK( esp_wifi_start() );
-    
-    // ESP_LOGI(TAG, "wifi_init finished.");  
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+        //ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+        ESP_ERROR_CHECK(esp_wifi_start());
+
+        // ESP_LOGI(TAG, "wifi_init finished.");
+        // vTaskDelay(5000 / portTICK_PERIOD_MS);
+        // mqtt_app_start();
+    }
+
+    // ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    // ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
+    //  ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config2));
+    // ESP_ERROR_CHECK(esp_wifi_start());
+
+    // ESP_LOGI(TAG, "wifi_init finished.");
     // vTaskDelay(5000 / portTICK_PERIOD_MS);
     // mqtt_app_start();
 }
-
 
 void app_main(void)
 {
@@ -312,17 +398,100 @@ void app_main(void)
     esp_log_level_set("TRANSPORT", ESP_LOG_VERBOSE);
     esp_log_level_set("OUTBOX", ESP_LOG_VERBOSE);
 
-    ESP_ERROR_CHECK(nvs_flash_init());
-    initialise_wifi();
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
 
-   // ESP_ERROR_CHECK(esp_netif_init());
-   // ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_LOGI(TAG, "Initializing SPIFFS");
+
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = "/spiffs",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = true};
+
+    // Use settings defined above to initialize and mount SPIFFS filesystem.
+    // Note: esp_vfs_spiffs_register is an all-in-one convenience function.
+    ret = esp_vfs_spiffs_register(&conf);
+
+    if (ret != ESP_OK)
+    {
+        if (ret == ESP_FAIL)
+        {
+            ESP_LOGE(TAG, "Failed to mount or format filesystem");
+        }
+        else if (ret == ESP_ERR_NOT_FOUND)
+        {
+            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return;
+    }
+
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(conf.partition_label, &total, &used);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
+    }
+
+    // Open renamed file for reading
+    ESP_LOGI(TAG, "Reading file");
+    FILE *f = fopen("/spiffs/vmllp_ssid.txt", "r");
+    FILE *f1 = fopen("/spiffs/vmllp_password.txt", "r");
+
+    char line[64];
+    char line1[64];
+    if (f == NULL || f1 == NULL)
+    {
+        ESP_LOGI(TAG, "Failed to open file for reading");
+        initialise_wifi(line, line1);
+    }
+    else
+    {
+
+        fgets(line, sizeof(line), f);
+        fclose(f);
+        // strip newline
+        char *pos = strchr(line, '\n');
+        if (pos)
+        {
+            *pos = '\0';
+        }
+        ESP_LOGI(TAG, "Read SSID from file: '%s'", line);
+
+        fgets(line1, sizeof(line), f1);
+        fclose(f1);
+        // strip newline
+        char *pos1 = strchr(line1, '\n');
+        if (pos1)
+        {
+            *pos1 = '\0';
+        }
+        ESP_LOGI(TAG, "Read Password from file: '%s'", line1);
+
+        initialise_wifi(line, line1);
+    }
+
+    // ESP_ERROR_CHECK(esp_netif_init());
+    // ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
      * Read "Establishing Wi-Fi or Ethernet Connection" section in
      * examples/protocols/README.md for more information about this function.
      */
-   // ESP_ERROR_CHECK(example_connect());
-  
-   // mqtt_app_start();
+    // ESP_ERROR_CHECK(example_connect());
+
+    // mqtt_app_start();
 }
