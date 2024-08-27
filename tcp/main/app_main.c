@@ -41,7 +41,6 @@
 #include "sdkconfig.h"
 #include "freertos/queue.h"
 
-
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -60,44 +59,69 @@ static int s_retry_num = 0;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
 
-static const int RX_BUF_SIZE = 10;
-static uint8_t uart_data[10] = {0};
 
-#define TXD_PIN 17
-#define RXD_PIN 16
+#define CONFIG_EXAMPLE_UART_PORT_NUM 2
+#define CONFIG_EXAMPLE_UART_BAUD_RATE 9600
+#define CONFIG_EXAMPLE_UART_RXD 16
+#define CONFIG_EXAMPLE_UART_TXD 17
+#define CONFIG_EXAMPLE_TASK_STACK_SIZE 4096
 
-void init_uart(void)
+
+
+#define ECHO_TEST_TXD (CONFIG_EXAMPLE_UART_TXD)
+#define ECHO_TEST_RXD (CONFIG_EXAMPLE_UART_RXD)
+#define ECHO_TEST_RTS (UART_PIN_NO_CHANGE)
+#define ECHO_TEST_CTS (UART_PIN_NO_CHANGE)
+
+#define ECHO_UART_PORT_NUM      (CONFIG_EXAMPLE_UART_PORT_NUM)
+//#define ECHO_UART_BAUD_RATE     (CONFIG_EXAMPLE_UART_BAUD_RATE)
+#define ECHO_TASK_STACK_SIZE    (CONFIG_EXAMPLE_TASK_STACK_SIZE)
+
+//static const char *TAG = "UART TEST";
+
+#define BUF_SIZE (1024)
+
+uint8_t *data_new = NULL;
+
+static void echo_task(void *arg)
 {
-    const uart_config_t uart_config = {
+    /* Configure parameters of an UART driver,
+     * communication pins and install the driver */
+    uart_config_t uart_config = {
         .baud_rate = 9600,
         .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
+        .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_APB,
     };
-    // We won't use a buffer for sending data.
-    uart_driver_install(UART_NUM_2, RX_BUF_SIZE * 2, 0, 0, NULL, 0);
-    uart_param_config(UART_NUM_2, &uart_config);
-    uart_set_pin(UART_NUM_2, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-}
+    int intr_alloc_flags = 0;
 
-static void rx_task(void *arg)
-{
-    static const char *RX_TASK_TAG = "RX_TASK";
-    esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
-    while (1)
-    {
-        const int len = uart_read_bytes(UART_NUM_2, uart_data,  (RX_BUF_SIZE - 1), 500 / portTICK_RATE_MS);
+#if CONFIG_UART_ISR_IN_IRAM
+    intr_alloc_flags = ESP_INTR_FLAG_IRAM;
+#endif
+
+    ESP_ERROR_CHECK(uart_driver_install(ECHO_UART_PORT_NUM, BUF_SIZE * 2, 0, 0, NULL, intr_alloc_flags));
+    ESP_ERROR_CHECK(uart_param_config(ECHO_UART_PORT_NUM, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin(ECHO_UART_PORT_NUM, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS));
+    // Configure a temporary buffer for the incoming data
+ 
+    uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
+    ESP_LOGI(TAG, "echo_task");
+    while (1) {
+        // Read data from the UART
+        int len = uart_read_bytes(ECHO_UART_PORT_NUM, data, (BUF_SIZE - 1), 20 / portTICK_RATE_MS);
+        // Write data back to the UART
+        
+        data_new=data;
+        uart_write_bytes(ECHO_UART_PORT_NUM, (const char *) data_new, len);
+        
         if (len) {
-            uart_data[len] = '\0';
-            ESP_LOGI(TAG, "Recv str: %s", (char *) uart_data);
+            data[len] = '\0';
+            ESP_LOGI(TAG, "Recv str: %s", (char *) data);
         }
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
     }
-    vTaskDelete(NULL);
 }
-
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -119,6 +143,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
         ESP_LOGI(TAG, "connect to the AP fail");
+        //RED LED OFF
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
     {
@@ -129,6 +154,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         ESP_LOGI(TAG, "wifi_init finished.");
         vTaskDelay(5000 / portTICK_PERIOD_MS);
+        //RED LED ON
         mqtt_app_start();
     }
 }
@@ -197,7 +223,7 @@ static void event_handler_smartconfig(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "PASSWORD:%s", password);
 
         ESP_LOGI(TAG, "Opening file");
-        FILE *f = fopen("/spiffs/vmllp_ssid.txt", "w");
+        FILE *f = fopen("/spiffs/aqua_ssid.txt", "w");
         if (f == NULL)
         {
             ESP_LOGE(TAG, "Failed to open file for writing");
@@ -205,13 +231,13 @@ static void event_handler_smartconfig(void *arg, esp_event_base_t event_base,
         }
         else
         {
-            ESP_LOGI(TAG, "SSID in vmllp_ssid file written");
+            ESP_LOGI(TAG, "SSID in aqua_ssid file written");
         }
         fprintf(f, (char *)ssid);
         fclose(f);
 
         ESP_LOGI(TAG, "Opening file");
-        FILE *f1 = fopen("/spiffs/vmllp_password.txt", "w");
+        FILE *f1 = fopen("/spiffs/aqua_password.txt", "w");
         if (f1 == NULL)
         {
             ESP_LOGI(TAG, "Failed to open file for writing");
@@ -219,7 +245,7 @@ static void event_handler_smartconfig(void *arg, esp_event_base_t event_base,
         }
         else
         {
-            ESP_LOGI(TAG, "Password in vmllp_password file written");
+            ESP_LOGI(TAG, "Password in aqua_password file written");
         }
         fprintf(f1, (char *)password);
         fclose(f1);
@@ -227,7 +253,7 @@ static void event_handler_smartconfig(void *arg, esp_event_base_t event_base,
         ESP_ERROR_CHECK(esp_wifi_disconnect());
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
         esp_wifi_connect();
-         vTaskDelay(5000 / portTICK_PERIOD_MS);
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
         mqtt_app_start();
     }
     else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE)
@@ -264,9 +290,11 @@ static void esp_mqtt_publish_task(void *parm)
     esp_mqtt_client_handle_t client = (esp_mqtt_client_handle_t)parm;
     while (1)
     {
-        msg_id = esp_mqtt_client_publish(client, "kunjan/superb1",(char *) uart_data, 7, 1, 1);
+        msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", (char *)data_new, 7, 1, 1);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        //GREEN led on
         vTaskDelay(5000 / portTICK_RATE_MS);
+        // green led off
     }
     vTaskDelete(NULL);
 }
@@ -280,27 +308,16 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        //RED LED ON
         xTaskCreate(&esp_mqtt_publish_task, "esp_mqtt_publish_task", 4096, (void *)client, 3, NULL);
-        // msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", "Hello Kushal", 0, 1, 0);
-        // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-
-        // msg_id = esp_mqtt_client_subscribe(client, "kunjan/superb1", 0);
-        // ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-
-        // msg_id = esp_mqtt_client_subscribe(client, "/topic/qos1", 1);
-        // ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-
-        // msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos1");
-        // ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        //RED LED OFF
         break;
 
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        msg_id = esp_mqtt_client_publish(client, "kunjanrshah@gmail.com/topic1", "data", 0, 0, 0);
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_UNSUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
@@ -315,6 +332,7 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+        //RED LED OFF
         break;
     default:
         ESP_LOGI(TAG, "Other event id:%d", event->event_id);
@@ -372,7 +390,7 @@ static void mqtt_app_start(void)
     esp_mqtt_client_start(client);
 }
 
-static void initialise_wifi(char *ssid1, char *password1)
+static void initialise_wifi(char *ssid1, char *password1, uint8_t apmode)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     s_wifi_event_group = xEventGroupCreate();
@@ -383,21 +401,25 @@ static void initialise_wifi(char *ssid1, char *password1)
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    if (ssid1 == NULL && password1 == NULL)
+    ESP_LOGI(TAG, "[APP] KUNJAN INIT..");
+    if (apmode == 0)
     {
+        ESP_LOGI(TAG, "[APP] SMART CONFIG..");
         ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler_smartconfig, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler_smartconfig, NULL));
         ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &event_handler_smartconfig, NULL));
+
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+        ESP_ERROR_CHECK(esp_wifi_start());
     }
     else
     {
+        ESP_LOGI(TAG, "[APP] WIFI INIT..");
         ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
         ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
 
-       
         wifi_config_t wifi_config;
         bzero(&wifi_config, sizeof(wifi_config_t));
         memcpy(wifi_config.sta.ssid, ssid1, strlen(ssid1));
@@ -406,7 +428,6 @@ static void initialise_wifi(char *ssid1, char *password1)
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
         ESP_ERROR_CHECK(esp_wifi_start());
-
     }
 }
 
@@ -431,9 +452,9 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    
-    init_uart();
-    
+
+    //init_uart();
+
     ESP_LOGI(TAG, "Initializing SPIFFS");
 
     esp_vfs_spiffs_conf_t conf = {
@@ -476,15 +497,15 @@ void app_main(void)
 
     // Open renamed file for reading
     ESP_LOGI(TAG, "Reading file");
-    FILE *f = fopen("/spiffs/vmllp_ssid.txt", "r");
-    FILE *f1 = fopen("/spiffs/vmllp_password.txt", "r");
+    FILE *f = fopen("/spiffs/aqua_ssid.txt", "r");
+    FILE *f1 = fopen("/spiffs/aqua_password.txt", "r");
 
     char line[64];
     char line1[64];
     if (f == NULL || f1 == NULL)
     {
         ESP_LOGI(TAG, "Failed to open file for reading");
-        initialise_wifi(line, line1);
+        initialise_wifi(line, line1, 0);
     }
     else
     {
@@ -509,9 +530,10 @@ void app_main(void)
         }
         ESP_LOGI(TAG, "Read Password from file: '%s'", line1);
 
-        initialise_wifi(line, line1);
+        initialise_wifi(line, line1, 1);
     }
 
-     xTaskCreate(&rx_task, "rx_task", 1024 * 2, NULL, 10, NULL);
-    
+    // xTaskCreate(&rx_task, "rx_task", 1024 * 2, NULL, 10, NULL);
+     xTaskCreate(echo_task, "uart_echo_task", ECHO_TASK_STACK_SIZE, NULL, 10, NULL);
+   
 }
