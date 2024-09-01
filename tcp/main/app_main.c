@@ -61,7 +61,7 @@ static int s_retry_num = 0;
 
 
 #define CONFIG_EXAMPLE_UART_PORT_NUM 2
-#define CONFIG_EXAMPLE_UART_BAUD_RATE 9600
+#define CONFIG_EXAMPLE_UART_BAUD_RATE  115200//9600
 #define CONFIG_EXAMPLE_UART_RXD 16
 #define CONFIG_EXAMPLE_UART_TXD 17
 #define CONFIG_EXAMPLE_TASK_STACK_SIZE 4096
@@ -88,7 +88,7 @@ static void echo_task(void *arg)
     /* Configure parameters of an UART driver,
      * communication pins and install the driver */
     uart_config_t uart_config = {
-        .baud_rate = 9600,
+        .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
         .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
@@ -123,6 +123,42 @@ static void echo_task(void *arg)
     }
 }
 
+static void reset_password(void *pvParameters)
+{
+     gpio_set_direction(GPIO_NUM_23, GPIO_MODE_INPUT);
+     gpio_set_pull_mode(GPIO_NUM_23, GPIO_PULLUP_ONLY);
+
+    
+    while (1)
+    {
+        int reset_key_press = gpio_get_level(GPIO_NUM_23);
+        
+        if (reset_key_press == 0) // 1 is pressed
+        {
+            printf("Reset key pressed\n");
+            struct stat st;
+            if (stat("/spiffs/aqua_ssid.txt", &st) == 0)
+            {
+                // Delete it if it exists
+                unlink("/spiffs/aqua_ssid.txt");
+                unlink("/spiffs/aqua_password.txt");
+                // FILE *f = fopen("/spiffs/aqua_ssid.txt", "r");
+                // FILE *f1 = fopen("/spiffs/aqua_password.txt", "r");
+
+            }
+            esp_restart();
+        }
+        else
+        {
+
+           // printf("Reset key not pressed\n");
+        }
+        //vTaskDelay(5000 / portTICK_PERIOD_MS);
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+    vTaskDelete(NULL);
+}
+
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
@@ -143,7 +179,9 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
         ESP_LOGI(TAG, "connect to the AP fail");
-        //RED LED OFF
+
+                gpio_set_level(GPIO_NUM_2, 0);  //RED LED OFF
+
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
     {
@@ -154,7 +192,8 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         ESP_LOGI(TAG, "wifi_init finished.");
         vTaskDelay(5000 / portTICK_PERIOD_MS);
-        //RED LED ON
+        gpio_set_level(GPIO_NUM_2, 1);  //RED LED ON
+
         mqtt_app_start();
     }
 }
@@ -292,9 +331,9 @@ static void esp_mqtt_publish_task(void *parm)
     {
         msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", (char *)data_new, 7, 1, 1);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-        //GREEN led on
+         gpio_set_level(GPIO_NUM_5, 0); //GREEN led on
         vTaskDelay(5000 / portTICK_RATE_MS);
-        // green led off
+         gpio_set_level(GPIO_NUM_5, 1); // green led off
     }
     vTaskDelete(NULL);
 }
@@ -308,12 +347,13 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        //RED LED ON
+        gpio_set_level(GPIO_NUM_2, 1);  //RED LED ON
         xTaskCreate(&esp_mqtt_publish_task, "esp_mqtt_publish_task", 4096, (void *)client, 3, NULL);
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        //RED LED OFF
+        gpio_set_level(GPIO_NUM_2, 0);  //RED LED OFF
+        
         break;
 
     case MQTT_EVENT_SUBSCRIBED:
@@ -332,7 +372,8 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-        //RED LED OFF
+        
+        gpio_set_level(GPIO_NUM_2, 0);  //RED LED OFF
         break;
     default:
         ESP_LOGI(TAG, "Other event id:%d", event->event_id);
@@ -410,7 +451,16 @@ static void initialise_wifi(char *ssid1, char *password1, uint8_t apmode)
         ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
         ESP_ERROR_CHECK(esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &event_handler_smartconfig, NULL));
 
+        wifi_config_t wifi_config1;
+        char *ssid_ap = "SUPERB01";
+        char *password_ap = "12345678";
+        bzero(&wifi_config1, sizeof(wifi_config_t));
+        memcpy(wifi_config1.ap.ssid, ssid_ap, strlen(ssid_ap));
+        memcpy(wifi_config1.ap.password, password_ap, strlen(password_ap));
+        
+
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
         ESP_ERROR_CHECK(esp_wifi_start());
     }
     else
@@ -425,14 +475,34 @@ static void initialise_wifi(char *ssid1, char *password1, uint8_t apmode)
         memcpy(wifi_config.sta.ssid, ssid1, strlen(ssid1));
         memcpy(wifi_config.sta.password, password1, strlen(password1));
 
+
+        wifi_config_t wifi_config1;
+        char *ssid_ap = "SUPERB01";
+        char *password_ap = "12345678";
+        bzero(&wifi_config1, sizeof(wifi_config_t));
+        memcpy(wifi_config1.ap.ssid, ssid_ap, strlen(ssid_ap));
+        memcpy(wifi_config1.ap.password, password_ap, strlen(password_ap));
+
+
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
         ESP_ERROR_CHECK(esp_wifi_start());
     }
 }
 
 void app_main(void)
 {
+    //gpio_set_direction(GPIO_NUM_23, GPIO_MODE_INPUT); // key input
+    
+
+    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
+    gpio_set_direction(GPIO_NUM_5, GPIO_MODE_OUTPUT);
+   
+    gpio_set_level(GPIO_NUM_2, 0); // off
+    gpio_set_level(GPIO_NUM_5, 0); // off
+    
+
     ESP_LOGI(TAG, "[APP] Startup..");
     ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
@@ -534,6 +604,8 @@ void app_main(void)
     }
 
     // xTaskCreate(&rx_task, "rx_task", 1024 * 2, NULL, 10, NULL);
-     xTaskCreate(echo_task, "uart_echo_task", ECHO_TASK_STACK_SIZE, NULL, 10, NULL);
+    xTaskCreate(echo_task, "uart_echo_task", ECHO_TASK_STACK_SIZE, NULL, 10, NULL);
+    xTaskCreate(reset_password, "reset_password", 4096, NULL, 5, NULL);
+
    
 }
