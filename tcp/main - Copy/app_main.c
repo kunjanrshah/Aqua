@@ -59,22 +59,25 @@ static int s_retry_num = 0;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
 
+
 #define CONFIG_EXAMPLE_UART_PORT_NUM 2
-#define CONFIG_EXAMPLE_UART_BAUD_RATE 115200 // 9600
+#define CONFIG_EXAMPLE_UART_BAUD_RATE  115200//9600
 #define CONFIG_EXAMPLE_UART_RXD 16
 #define CONFIG_EXAMPLE_UART_TXD 17
 #define CONFIG_EXAMPLE_TASK_STACK_SIZE 4096
+
+
 
 #define ECHO_TEST_TXD (CONFIG_EXAMPLE_UART_TXD)
 #define ECHO_TEST_RXD (CONFIG_EXAMPLE_UART_RXD)
 #define ECHO_TEST_RTS (UART_PIN_NO_CHANGE)
 #define ECHO_TEST_CTS (UART_PIN_NO_CHANGE)
 
-#define ECHO_UART_PORT_NUM (CONFIG_EXAMPLE_UART_PORT_NUM)
-// #define ECHO_UART_BAUD_RATE     (CONFIG_EXAMPLE_UART_BAUD_RATE)
-#define ECHO_TASK_STACK_SIZE (CONFIG_EXAMPLE_TASK_STACK_SIZE)
+#define ECHO_UART_PORT_NUM      (CONFIG_EXAMPLE_UART_PORT_NUM)
+//#define ECHO_UART_BAUD_RATE     (CONFIG_EXAMPLE_UART_BAUD_RATE)
+#define ECHO_TASK_STACK_SIZE    (CONFIG_EXAMPLE_TASK_STACK_SIZE)
 
-// static const char *TAG = "UART TEST";
+//static const char *TAG = "UART TEST";
 
 #define BUF_SIZE (1024)
 
@@ -87,7 +90,7 @@ static void echo_task(void *arg)
     uart_config_t uart_config = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
+        .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_APB,
@@ -102,35 +105,35 @@ static void echo_task(void *arg)
     ESP_ERROR_CHECK(uart_param_config(ECHO_UART_PORT_NUM, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(ECHO_UART_PORT_NUM, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS));
     // Configure a temporary buffer for the incoming data
-
-    uint8_t *data = (uint8_t *)malloc(BUF_SIZE);
+ 
+    uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
     ESP_LOGI(TAG, "echo_task");
-    while (1)
-    {
+    
+    while (1) {
         // Read data from the UART
         int len = uart_read_bytes(ECHO_UART_PORT_NUM, data, (BUF_SIZE - 1), 20 / portTICK_RATE_MS);
         // Write data back to the UART
-
-        data_new = data;
-        uart_write_bytes(ECHO_UART_PORT_NUM, (const char *)data_new, len);
-
-        if (len)
-        {
+        
+        data_new=data;
+        uart_write_bytes(ECHO_UART_PORT_NUM, (const char *) data_new, len);
+        
+        if (len) {
             data[len] = '\0';
-            ESP_LOGI(TAG, "Recv str: %s", (char *)data);
+            ESP_LOGI(TAG, "Recv str: %s", (char *) data);
         }
     }
 }
 
 static void reset_password(void *pvParameters)
 {
-    gpio_set_direction(GPIO_NUM_23, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(GPIO_NUM_23, GPIO_PULLUP_ONLY);
+     gpio_set_direction(GPIO_NUM_23, GPIO_MODE_INPUT);
+     gpio_set_pull_mode(GPIO_NUM_23, GPIO_PULLUP_ONLY);
 
+    
     while (1)
     {
         int reset_key_press = gpio_get_level(GPIO_NUM_23);
-
+        
         if (reset_key_press == 0) // 1 is pressed
         {
             printf("Reset key pressed\n");
@@ -142,15 +145,16 @@ static void reset_password(void *pvParameters)
                 unlink("/spiffs/aqua_password.txt");
                 // FILE *f = fopen("/spiffs/aqua_ssid.txt", "r");
                 // FILE *f1 = fopen("/spiffs/aqua_password.txt", "r");
+
             }
             esp_restart();
         }
         else
         {
 
-            // printf("Reset key not pressed\n");
+           // printf("Reset key not pressed\n");
         }
-        // vTaskDelay(5000 / portTICK_PERIOD_MS);
+        //vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
     vTaskDelete(NULL);
@@ -177,7 +181,8 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         }
         ESP_LOGI(TAG, "connect to the AP fail");
 
-        gpio_set_level(GPIO_NUM_2, 1); // RED LED OFF
+                gpio_set_level(GPIO_NUM_2, 1);  //RED LED OFF
+
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
     {
@@ -188,7 +193,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         ESP_LOGI(TAG, "wifi_init finished.");
         vTaskDelay(5000 / portTICK_PERIOD_MS);
-        gpio_set_level(GPIO_NUM_2, 1); // RED LED ON
+        gpio_set_level(GPIO_NUM_2, 1);  //RED LED ON
 
         mqtt_app_start();
     }
@@ -210,6 +215,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
+
 static void event_handler_smartconfig(void *arg, esp_event_base_t event_base,
                                       int32_t event_id, void *event_data)
 {
@@ -228,8 +234,9 @@ static void event_handler_smartconfig(void *arg, esp_event_base_t event_base,
     }
     else if (event_base == SC_EVENT && event_id == SC_EVENT_SCAN_DONE)
     {
-        ESP_LOGI(TAG, "Scan done");
-        gpio_set_level(GPIO_NUM_5, 1); // GREEN led on // scane done
+        ESP_LOGI(TAG, "Scan done"); 
+         gpio_set_level(GPIO_NUM_5, 1); //GREEN led on // scane done
+        
     }
     else if (event_base == SC_EVENT && event_id == SC_EVENT_FOUND_CHANNEL)
     {
@@ -326,12 +333,11 @@ static void esp_mqtt_publish_task(void *parm)
     esp_mqtt_client_handle_t client = (esp_mqtt_client_handle_t)parm;
     while (1)
     {
-        //msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", (char *)data_new, 7, 1, 1);
-        msg_id = esp_mqtt_client_publish(client, "kunjan/superb2", (char *)data_new, 7, 1, 1);
+        msg_id = esp_mqtt_client_publish(client, "kunjan/superb1", (char *)data_new, 7, 1, 1);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-        gpio_set_level(GPIO_NUM_5, 0); // GREEN led on
+        gpio_set_level(GPIO_NUM_5, 0); //GREEN led on
         vTaskDelay(5000 / portTICK_RATE_MS);
-        gpio_set_level(GPIO_NUM_5, 1); // green led off
+         gpio_set_level(GPIO_NUM_5, 1); // green led off
     }
     vTaskDelete(NULL);
 }
@@ -345,13 +351,13 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        gpio_set_level(GPIO_NUM_2, 1); // RED LED ON
+        gpio_set_level(GPIO_NUM_2, 1);  //RED LED ON
         xTaskCreate(&esp_mqtt_publish_task, "esp_mqtt_publish_task", 4096, (void *)client, 3, NULL);
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        gpio_set_level(GPIO_NUM_2, 0); // RED LED OFF
-
+        gpio_set_level(GPIO_NUM_2, 0);  //RED LED OFF
+        
         break;
 
     case MQTT_EVENT_SUBSCRIBED:
@@ -370,8 +376,8 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-
-        gpio_set_level(GPIO_NUM_2, 0); // RED LED OFF
+        
+        gpio_set_level(GPIO_NUM_2, 0);  //RED LED OFF
         break;
     default:
         ESP_LOGI(TAG, "Other event id:%d", event->event_id);
@@ -450,11 +456,12 @@ static void initialise_wifi(char *ssid1, char *password1, uint8_t apmode)
         ESP_ERROR_CHECK(esp_event_handler_register(SC_EVENT, ESP_EVENT_ANY_ID, &event_handler_smartconfig, NULL));
 
         wifi_config_t wifi_config1;
-        char *ssid_ap = "SUPERB01";//char *ssid_ap = "SUPERB01";
+        char *ssid_ap = "SUPERB01";
         char *password_ap = "12345678";
         bzero(&wifi_config1, sizeof(wifi_config_t));
         memcpy(wifi_config1.ap.ssid, ssid_ap, strlen(ssid_ap));
         memcpy(wifi_config1.ap.password, password_ap, strlen(password_ap));
+        
 
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
@@ -472,57 +479,34 @@ static void initialise_wifi(char *ssid1, char *password1, uint8_t apmode)
         memcpy(wifi_config.sta.ssid, ssid1, strlen(ssid1));
         memcpy(wifi_config.sta.password, password1, strlen(password1));
 
+
         wifi_config_t wifi_config1;
-        char *ssid_ap = "SUPERB01";  //char *ssid_ap = "SUPERB01";
-       
+        char *ssid_ap = "SUPERB01";
         char *password_ap = "12345678";
         bzero(&wifi_config1, sizeof(wifi_config_t));
         memcpy(wifi_config1.ap.ssid, ssid_ap, strlen(ssid_ap));
         memcpy(wifi_config1.ap.password, password_ap, strlen(password_ap));
+
 
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
         ESP_ERROR_CHECK(esp_wifi_start());
     }
-    
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
-    uint8_t mac[6];
-    esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    if (err == ESP_OK)
-    {
-        ESP_LOGI("Fix MAC Address", "MAC: %02X:%02X:%02X:%02X:%02X:%02X",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    }
-    else
-    {
-        ESP_LOGE("Fix MAC Address", "Failed to read MAC address");
-    }
-
-
-    // err = esp_read_mac(mac, WIFI_MODE_APSTA);
-    // if (err == ESP_OK)
-    // {
-    //     ESP_LOGI("MAC Address", "MAC: %02X:%02X:%02X:%02X:%02X:%02X",
-    //              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    // }
-    // else
-    // {
-    //     ESP_LOGE("MAC Address", "Failed to read MAC address");
-    // }
-
-    esp_base_mac_addr_set(mac);
 }
 
 void app_main(void)
 {
-    // gpio_set_direction(GPIO_NUM_23, GPIO_MODE_INPUT); // key input
+    //gpio_set_direction(GPIO_NUM_23, GPIO_MODE_INPUT); // key input
+    
 
     gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
     gpio_set_direction(GPIO_NUM_5, GPIO_MODE_OUTPUT);
-
+   
     gpio_set_level(GPIO_NUM_2, 0); // off
     gpio_set_level(GPIO_NUM_5, 0); // off
+    
+    
 
     ESP_LOGI(TAG, "[APP] Startup..");
     ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
@@ -544,7 +528,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // init_uart();
+    //init_uart();
 
     ESP_LOGI(TAG, "Initializing SPIFFS");
 
@@ -627,4 +611,6 @@ void app_main(void)
     // xTaskCreate(&rx_task, "rx_task", 1024 * 2, NULL, 10, NULL);
     xTaskCreate(echo_task, "uart_echo_task", ECHO_TASK_STACK_SIZE, NULL, 10, NULL);
     xTaskCreate(reset_password, "reset_password", 4096, NULL, 5, NULL);
+
+   
 }
